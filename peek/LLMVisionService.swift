@@ -64,42 +64,75 @@ enum LLMVisionService {
     }
 
     private static let systemPrompt = """
-    The user is asking about a screenshot of their screen. Reply with JSON only, no other text.
-    Use this exact format: {"answer": "short explanation of where to click or what to do", "boundingBox": {"x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0}}
-    - answer: brief text for the user.
-    - boundingBox: optional. Top-left (x,y) and size (width, height), normalized 0.0–1.0 relative to the image (0,0 = top-left). Only include if there is a specific UI element to highlight (e.g. a button or area to click). If the question doesn't refer to a visible element, omit boundingBox or set it to null.
+    The user is asking about a screenshot of their screen (e.g. "Where do I click?", "How do I do this?", "Which button?", "How do I click on this part?"). Your job is to answer in text AND to return a bounding box so the app can highlight the relevant area on screen.
+
+    Reply with JSON only, no other text. Use this exact format:
+    {"answer": "short explanation of where to click or what to do", "boundingBox": {"x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0}}
+
+    Rules:
+    - answer: Brief, helpful text (e.g. "Click the Settings gear in the top-right" or "Use the Search field at the top").
+    - boundingBox: REQUIRED whenever the user is asking where to click, which element to use, or how to do something that involves a specific visible UI element. Give the region the user should interact with (button, menu item, icon, field, etc.). Use top-left (x, y) and size (width, height), all normalized 0.0–1.0 relative to the image (0,0 = top-left of image, 1,1 = bottom-right). Only omit boundingBox or set it to null if the question has no single target (e.g. general explanation with no specific element).
+
+    When in doubt, include a bounding box for the most relevant element so we can show a highlight on screen.
     """
+
+    private static func log(_ message: String) {
+        print("[LLMVision] \(message)")
+    }
 
     /// Sends the image and question to the vision API; returns answer and optional normalized bbox.
     static func ask(image: NSImage, question: String) async throws -> VisionResponse {
+        log("ask() called — question: \"\(question)\"")
+        log("input image size: \(image.size.width)x\(image.size.height) points")
+
         guard let key = apiKey, !key.isEmpty else {
+            log("error: missing API key")
             throw LLMVisionError.missingAPIKey
         }
 
         let base64 = try encodeImageAsBase64(image)
+        log("image encoded as base64, length: \(base64.count) chars")
+
         let body = buildOpenAIRequestBody(imageBase64: base64, userMessage: question)
+        log("sending request to OpenAI (model: gpt-4o, user message length: \(question.count))")
+
         let (data, response) = try await performRequest(body: body, apiKey: key)
 
         guard let http = response as? HTTPURLResponse else {
+            log("error: response was not HTTPURLResponse")
             throw LLMVisionError.invalidResponse
         }
+        log("HTTP status: \(http.statusCode), response body length: \(data.count) bytes")
+
         guard (200 ..< 300).contains(http.statusCode) else {
             let message = String(data: data, encoding: .utf8) ?? "Unknown error"
+            log("API error body: \(message)")
             throw LLMVisionError.apiError(statusCode: http.statusCode, body: message)
         }
 
-        return try parseOpenAIResponse(data: data)
+        let result = try parseOpenAIResponse(data: data)
+        log("result — answer: \"\(result.answer)\"")
+        if let bbox = result.boundingBox {
+            log("result — boundingBox: x=\(bbox.x), y=\(bbox.y), width=\(bbox.width), height=\(bbox.height)")
+        } else {
+            log("result — boundingBox: nil")
+        }
+        return result
     }
 
     // MARK: - Image encoding
 
     private static func encodeImageAsBase64(_ image: NSImage) throws -> String {
+        log("encoding image to PNG then base64")
         guard let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),
               let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            log("error: image encoding failed (TIFF/bitmap/PNG)")
             throw LLMVisionError.imageEncodingFailed
         }
-        return pngData.base64EncodedString()
+        let base64 = pngData.base64EncodedString()
+        log("PNG size: \(pngData.count) bytes")
+        return base64
     }
 
     // MARK: - OpenAI request
@@ -131,7 +164,10 @@ enum LLMVisionService {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        return try await URLSession.shared.data(for: request)
+        log("POST \(url.absoluteString), body size: \(request.httpBody?.count ?? 0) bytes")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        log("request completed")
+        return (data, response)
     }
 
     // MARK: - Response parsing
@@ -149,11 +185,15 @@ enum LLMVisionService {
     }
 
     private static func parseOpenAIResponse(data: Data) throws -> VisionResponse {
+        log("parsing OpenAI response")
         let decoded = try JSONDecoder().decode(OpenAIResponse.self, from: data)
         guard let content = decoded.choices?.first?.message.content, !content.isEmpty else {
+            log("error: choices empty or message content empty")
             throw LLMVisionError.emptyContent
         }
+        log("raw LLM content (\(content.count) chars): \(content)")
         let jsonString = extractJSON(from: content)
+        log("extracted JSON length: \(jsonString.count)")
         let jsonData = Data(jsonString.utf8)
 
         struct RawBoundingBox: Decodable {
@@ -172,6 +212,7 @@ enum LLMVisionService {
            (0...1).contains(x), (0...1).contains(y), (0...1).contains(w), (0...1).contains(h) {
             bbox = (x, y, w, h)
         }
+        log("parsed — answer: \"\(answer)\", boundingBox present: \(bbox != nil)")
         return VisionResponse(answer: answer, boundingBox: bbox)
     }
 
