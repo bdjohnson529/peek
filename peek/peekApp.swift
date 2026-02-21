@@ -2,16 +2,27 @@
 //  peekApp.swift
 //  peek
 //
-//  Created by Ben Johnson on 21/02/2026.
+//  Menu bar app: shows Setup when permissions are missing, NSPanel overlay when granted.
 //
 
 import SwiftUI
 
 @main
 struct peekApp: App {
+    @State private var permissions = PermissionsManager()
+    @State private var overlayManager = OverlayPanelManager()
+
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        MenuBarExtra("Peek", systemImage: "eye") {
+            MenuBarContentView(permissions: permissions, overlayManager: overlayManager)
         }
+        .menuBarExtraStyle(.menu)
+
+        Window("Setup", id: "setup") {
+            SetupView(permissions: permissions)
+        }
+        .windowStyle(.titleBar)
+        .defaultSize(width: 400, height: 300)
+        .windowResizability(.contentSize)
     }
 }
