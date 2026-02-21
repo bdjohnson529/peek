@@ -76,7 +76,8 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
         panel.isFloatingPanel = true
         panel.becomesKeyOnlyIfNeeded = true
         panel.hidesOnDeactivate = false
-        panel.level = .floating
+        // Use a level above the menu bar so the overlay can sit in the top-right over it.
+        panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.maximumWindow)))
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.delegate = self
 
@@ -85,7 +86,14 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
         hosting.frame = panel.contentRect(forFrameRect: panel.frame)
         panel.contentView = hosting
 
-        panel.center()
+        // Position in top-right of screen, as far up and right as possible (over menu bar).
+        let screen = NSScreen.main ?? NSScreen.screens.first
+        let screenFrame = screen?.frame ?? panel.frame
+        let panelFrame = panel.frame
+        let x = screenFrame.maxX - panelFrame.width
+        let y = screenFrame.maxY - panelFrame.height
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
+
         panel.orderFrontRegardless()
 
         self.panel = panel
