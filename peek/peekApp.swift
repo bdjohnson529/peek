@@ -12,6 +12,12 @@ struct peekApp: App {
     @State private var permissions = PermissionsManager()
     @State private var overlayManager = OverlayPanelManager()
 
+    init() {
+        #if DEBUG
+        LLMVisionService.debugLogAPIKey()
+        #endif
+    }
+
     var body: some Scene {
         MenuBarExtra("Peek", systemImage: "eye") {
             MenuBarContentView(permissions: permissions, overlayManager: overlayManager)
@@ -24,5 +30,9 @@ struct peekApp: App {
         .windowStyle(.titleBar)
         .defaultSize(width: 400, height: 300)
         .windowResizability(.contentSize)
+
+        Settings {
+            SettingsView()
+        }
     }
 }

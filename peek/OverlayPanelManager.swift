@@ -260,7 +260,6 @@ struct OverlayPanelView: View {
     var onClose: () -> Void
 
     @State private var questionText = ""
-    @AppStorage(LLMVisionService.apiKeyUserDefaultsKey) private var apiKey = ""
 
     var body: some View {
         VStack(spacing: 12) {
@@ -326,14 +325,6 @@ struct OverlayPanelView: View {
             }
 
             Divider()
-
-            HStack {
-                Text("OpenAI API key:")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                SecureField("sk-...", text: $apiKey)
-                    .textFieldStyle(.roundedBorder)
-            }
 
             Button("Close Overlay", action: onClose)
                 .buttonStyle(.bordered)

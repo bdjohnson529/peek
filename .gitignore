@@ -64,3 +64,10 @@ fastlane/test_output/
 
 # Code injection
 *.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Local secrets / API keys (never commit)
+peek-secrets.plist
+*.secrets.plist
+.env
+.env.local
+Secrets.xcconfig

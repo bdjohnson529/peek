@@ -9,14 +9,52 @@
 import AppKit
 import Foundation
 
-// MARK: - API key storage
+// MARK: - API key storage (Run scheme env or Info.plist)
 
 enum LLMVisionService {
-    static let apiKeyUserDefaultsKey = "peek.openai_api_key"
+    private static let infoPlistKey = "OpenAIAPIKey"
 
+    /// API key is read from OPENAI_API_KEY environment variable (set in Run scheme: Edit Scheme → Run → Arguments → Environment Variables)
+    /// or from Info.plist key OpenAIAPIKey if present.
     static var apiKey: String? {
-        get { UserDefaults.standard.string(forKey: apiKeyUserDefaultsKey) }
-        set { UserDefaults.standard.set(newValue, forKey: apiKeyUserDefaultsKey) }
+        // Debug: trace where the key comes from and if it looks valid
+        let fromPlist = Bundle.main.object(forInfoDictionaryKey: infoPlistKey) as? String
+        let fromEnv = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
+        debugLogAPIKey(fromPlist: fromPlist, fromEnv: fromEnv)
+
+        if let key = fromPlist, !key.isEmpty {
+            return key.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let key = fromEnv, !key.isEmpty {
+            return key.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
+    }
+
+    /// Call from app launch or when debugging API key injection (Info.plist vs xcconfig).
+    static func debugLogAPIKey(fromPlist: String? = nil, fromEnv: String? = nil) {
+        let plist = fromPlist ?? (Bundle.main.object(forInfoDictionaryKey: infoPlistKey) as? String)
+        let env = fromEnv ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
+        print("[OpenAI API key debug]")
+        print("  Info.plist key '\(infoPlistKey)': \(describeKey(plist))")
+        print("  ENV OPENAI_API_KEY: \(describeKey(env))")
+        if let raw = plist {
+            if raw != raw.trimmingCharacters(in: .whitespacesAndNewlines) {
+                print("  ⚠️ Info.plist value has leading/trailing whitespace")
+            }
+        }
+        if let raw = env, raw != raw.trimmingCharacters(in: .whitespacesAndNewlines) {
+            print("  ⚠️ ENV value has leading/trailing whitespace")
+        }
+    }
+
+    private static func describeKey(_ value: String?) -> String {
+        guard let v = value else { return "nil" }
+        if v.isEmpty { return "empty string" }
+        let trimmed = v.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasSpace = v != trimmed
+        let preview = v.count > 11 ? "\(v.prefix(7))…\(v.suffix(4))" : "\(v.prefix(7))…"
+        return "length=\(v.count)\(hasSpace ? ", has leading/trailing space" : ""), preview=\"\(preview)\""
     }
 
     /// Response from the vision LLM: answer text and optional normalized (0–1) bounding box.
@@ -160,7 +198,7 @@ enum LLMVisionError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            return "OpenAI API key is not set. Add it in the overlay settings."
+            return "OpenAI API key is not set. Set OPENAI_API_KEY in the Run scheme: Product → Scheme → Edit Scheme → Run → Arguments → Environment Variables."
         case .imageEncodingFailed:
             return "Could not encode the screenshot."
         case .invalidResponse:
