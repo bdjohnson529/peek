@@ -9,9 +9,8 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// Key combination for "hold to show" overlay. Option+Space by default.
-private let overlayShortcutKeyCode: UInt16 = 49 // Space
-private let overlayShortcutModifiers: NSEvent.ModifierFlags = .option
+/// Modifiers for "hold to show" overlay. Command+Option only (no key), so typing in text fields isn't affected.
+private let overlayShortcutModifiers: NSEvent.ModifierFlags = [.command, .option]
 
 /// Manages a floating NSPanel overlay that stays on top of other windows without taking focus.
 @Observable
@@ -26,7 +25,7 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
     func startShortcutMonitoring() {
         stopShortcutMonitoring()
 
-        let mask: NSEvent.EventTypeMask = [.keyDown, .keyUp]
+        let mask: NSEvent.EventTypeMask = .flagsChanged
 
         localShortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
             self?.handleShortcutEvent(event)
@@ -51,14 +50,11 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
 
     private func handleShortcutEvent(_ event: NSEvent) {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let keyDown = event.type == .keyDown
-        let keyUp = event.type == .keyUp
-        let isShortcutKey = event.keyCode == overlayShortcutKeyCode
-        let modifiersMatch = modifiers.contains(overlayShortcutModifiers)
+        let bothHeld = modifiers.contains(overlayShortcutModifiers)
 
-        if keyDown, isShortcutKey, modifiersMatch {
+        if bothHeld {
             DispatchQueue.main.async { [weak self] in self?.show() }
-        } else if keyUp, isShortcutKey {
+        } else {
             DispatchQueue.main.async { [weak self] in self?.hide() }
         }
     }
