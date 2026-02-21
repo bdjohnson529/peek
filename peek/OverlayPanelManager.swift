@@ -63,13 +63,26 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
         }
     }
 
-    /// Captures the main display with ScreenCaptureKit, then shows the overlay with the screenshot.
+    /// Returns the display ID of the screen that currently contains the mouse (active display), or the main screen if none.
+    private static func displayIDForActiveScreen() -> CGDirectDisplayID? {
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
+        guard let screen else { return nil }
+        let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+        return id.map { $0.uint32Value }
+    }
+
+    /// Captures the display that contains the mouse (or main display) with ScreenCaptureKit, then shows the overlay.
     private func captureAndShow() {
+        let targetDisplayID = Self.displayIDForActiveScreen()
+
         Task { [weak self] in
             guard let self else { return }
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                guard let display = content.displays.first else {
+                let display = content.displays.first { $0.displayID == targetDisplayID }
+                    ?? content.displays.first
+                guard let display else {
                     await MainActor.run { self.showOverlayWithFallback(reason: "No display") }
                     return
                 }
@@ -128,8 +141,9 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
         hosting.frame = panel.contentRect(forFrameRect: panel.frame)
         panel.contentView = hosting
 
-        // Position in top-right of screen, as far up and right as possible (over menu bar).
-        let screen = NSScreen.main ?? NSScreen.screens.first
+        // Position in top-right of the active screen (same display we captured).
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main ?? NSScreen.screens.first
         let screenFrame = screen?.frame ?? panel.frame
         let panelFrame = panel.frame
         let x = screenFrame.maxX - panelFrame.width
