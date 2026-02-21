@@ -7,6 +7,7 @@
 
 import AppKit
 import Observation
+import ScreenCaptureKit
 import SwiftUI
 
 /// Modifiers for "hold to show" overlay. Command+Option only (no key), so typing in text fields isn't affected.
@@ -18,6 +19,9 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
 
     private var panel: NSPanel?
     private var contentView: NSHostingView<OverlayPanelView>?
+
+    /// Latest screenshot captured when shortcut was triggered; cleared on hide.
+    private var currentScreenshot: NSImage?
 
     private var localShortcutMonitor: Any?
     private var globalShortcutMonitor: Any?
@@ -53,17 +57,59 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
         let bothHeld = modifiers.contains(overlayShortcutModifiers)
 
         if bothHeld {
-            DispatchQueue.main.async { [weak self] in self?.show() }
+            DispatchQueue.main.async { [weak self] in self?.captureAndShow() }
         } else {
             DispatchQueue.main.async { [weak self] in self?.hide() }
         }
+    }
+
+    /// Captures the main display with ScreenCaptureKit, then shows the overlay with the screenshot.
+    private func captureAndShow() {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                guard let display = content.displays.first else {
+                    await MainActor.run { self.showOverlayWithFallback(reason: "No display") }
+                    return
+                }
+                let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+                var config = SCStreamConfiguration()
+                config.capturesAudio = false
+                config.showsCursor = true
+                let scale = filter.pointPixelScale
+                let rect = filter.contentRect
+                config.width = Int(rect.width * CGFloat(scale))
+                config.height = Int(rect.height * CGFloat(scale))
+
+                SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) { [weak self] cgImage, error in
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        if let cgImage {
+                            self.currentScreenshot = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+                        } else {
+                            self.currentScreenshot = nil
+                        }
+                        self.show()
+                    }
+                }
+            } catch {
+                await MainActor.run { self.showOverlayWithFallback(reason: "Capture failed") }
+            }
+        }
+    }
+
+    /// Shows the overlay without a screenshot (e.g. when capture failed); user still sees that the shortcut worked.
+    private func showOverlayWithFallback(reason: String) {
+        currentScreenshot = nil
+        show()
     }
 
     func show() {
         if panel != nil { return }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 360),
             styleMask: [.nonactivatingPanel, .titled, .closable],
             backing: .buffered,
             defer: false
@@ -77,7 +123,7 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.delegate = self
 
-        let content = OverlayPanelView(onClose: { [weak self] in self?.hide() })
+        let content = OverlayPanelView(screenshot: currentScreenshot, onClose: { [weak self] in self?.hide() })
         let hosting = NSHostingView(rootView: content)
         hosting.frame = panel.contentRect(forFrameRect: panel.frame)
         panel.contentView = hosting
@@ -100,6 +146,7 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
         panel?.orderOut(nil)
         panel = nil
         contentView = nil
+        currentScreenshot = nil
     }
 
     var isVisible: Bool {
@@ -116,14 +163,26 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
 
 /// SwiftUI content for the overlay panel (MVP placeholder).
 struct OverlayPanelView: View {
+    var screenshot: NSImage?
     var onClose: () -> Void
 
     var body: some View {
         VStack(spacing: 16) {
             Text("Peek Overlay")
                 .font(.headline)
-            Text("Overlay is active.")
-                .foregroundStyle(.secondary)
+
+            if let screenshot {
+                Image(nsImage: screenshot)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+            } else {
+                Text("Screenshot unavailable")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
             Button("Close Overlay", action: onClose)
                 .buttonStyle(.bordered)
         }
