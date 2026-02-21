@@ -9,12 +9,59 @@ import AppKit
 import Observation
 import SwiftUI
 
+/// Key combination for "hold to show" overlay. Option+Space by default.
+private let overlayShortcutKeyCode: UInt16 = 49 // Space
+private let overlayShortcutModifiers: NSEvent.ModifierFlags = .option
+
 /// Manages a floating NSPanel overlay that stays on top of other windows without taking focus.
 @Observable
-final class OverlayPanelManager {
+final class OverlayPanelManager: NSObject, NSWindowDelegate {
 
     private var panel: NSPanel?
     private var contentView: NSHostingView<OverlayPanelView>?
+
+    private var localShortcutMonitor: Any?
+    private var globalShortcutMonitor: Any?
+
+    func startShortcutMonitoring() {
+        stopShortcutMonitoring()
+
+        let mask: NSEvent.EventTypeMask = [.keyDown, .keyUp]
+
+        localShortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+            self?.handleShortcutEvent(event)
+            return event
+        }
+
+        globalShortcutMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
+            self?.handleShortcutEvent(event)
+        }
+    }
+
+    func stopShortcutMonitoring() {
+        if let local = localShortcutMonitor {
+            NSEvent.removeMonitor(local)
+            localShortcutMonitor = nil
+        }
+        if let global = globalShortcutMonitor {
+            NSEvent.removeMonitor(global)
+            globalShortcutMonitor = nil
+        }
+    }
+
+    private func handleShortcutEvent(_ event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let keyDown = event.type == .keyDown
+        let keyUp = event.type == .keyUp
+        let isShortcutKey = event.keyCode == overlayShortcutKeyCode
+        let modifiersMatch = modifiers.contains(overlayShortcutModifiers)
+
+        if keyDown, isShortcutKey, modifiersMatch {
+            DispatchQueue.main.async { [weak self] in self?.show() }
+        } else if keyUp, isShortcutKey {
+            DispatchQueue.main.async { [weak self] in self?.hide() }
+        }
+    }
 
     func show() {
         if panel != nil { return }
@@ -31,6 +78,7 @@ final class OverlayPanelManager {
         panel.hidesOnDeactivate = false
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.delegate = self
 
         let content = OverlayPanelView(onClose: { [weak self] in self?.hide() })
         let hosting = NSHostingView(rootView: content)
@@ -52,6 +100,13 @@ final class OverlayPanelManager {
 
     var isVisible: Bool {
         panel?.isVisible ?? false
+    }
+
+    // MARK: - NSWindowDelegate
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSPanel, window === panel else { return }
+        panel = nil
+        contentView = nil
     }
 }
 

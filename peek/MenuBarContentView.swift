@@ -30,6 +30,8 @@ struct MenuBarContentView: View {
                         overlayManager.show()
                     }
                 }
+                .keyboardShortcut(" ", modifiers: .option)
+                .help("Hold ⌥ Space to show overlay; release to hide")
             }
 
             Divider()
@@ -42,6 +44,7 @@ struct MenuBarContentView: View {
         .onAppear {
             permissions.refresh()
             if permissions.hasAllPermissions {
+                overlayManager.startShortcutMonitoring()
                 overlayManager.show()
             }
         }
