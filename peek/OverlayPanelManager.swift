@@ -209,9 +209,16 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
         self.panel = panel
         self.contentView = hosting
 
-        // Restore persisted highlight so it reappears whether we were shown via shortcut or menu.
-        if let rect = lastHighlightScreenRect, let frame = lastHighlightDisplayFrame {
-            highlightManager.show(screenRect: rect, displayFrame: frame, autoDismissAfterSeconds: 3600)
+        // Restore persisted highlight on next run loop so the overlay panel is fully visible first.
+        let rect = lastHighlightScreenRect
+        let frame = lastHighlightDisplayFrame
+        if rect != nil, frame != nil {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if let rect, let frame {
+                    self.highlightManager.show(screenRect: rect, displayFrame: frame, autoDismissAfterSeconds: 3600)
+                }
+            }
         }
     }
 
