@@ -212,7 +212,7 @@ enum LLMVisionService {
            (0...1).contains(x), (0...1).contains(y), (0...1).contains(w), (0...1).contains(h) {
             bbox = (x, y, w, h)
         }
-        log("parsed — answer: \"\(answer)\", boundingBox present: \(bbox != nil)")
+        log("parsed — answer: \"\(answer)\", boundingBox: \(bbox)")
         return VisionResponse(answer: answer, boundingBox: bbox)
     }
 
