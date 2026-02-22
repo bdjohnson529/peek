@@ -436,10 +436,6 @@ struct OverlayPanelView: View {
                 }
             }
 
-            Divider()
-
-            Button("Close Overlay", action: onClose)
-                .buttonStyle(.bordered)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding()
