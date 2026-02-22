@@ -47,6 +47,9 @@ final class HighlightOverlayManager {
         panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.maximumWindow)) + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.ignoresMouseEvents = false
+        // Match overlay panel: stay visible when user switches apps; only hide via hotkey.
+        panel.hidesOnDeactivate = false
+        panel.isFloatingPanel = true
 
         // Convert screen rect to window (content) coordinates.
         let rectInWindow = CGRect(

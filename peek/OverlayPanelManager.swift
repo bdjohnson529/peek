@@ -275,8 +275,7 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
     // MARK: - NSWindowDelegate
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSPanel, window === panel else { return }
-        panel = nil
-        contentView = nil
+        hide()
     }
 }
 
