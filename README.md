@@ -16,3 +16,7 @@ A macOS menu bar app that shows a floating overlay when you need it.
 ## Build and run
 
 Open `peek.xcodeproj` in Xcode and run (⌘R).
+
+## Setup
+
+- **Save screenshot to disk** — Optional. To save the exact PNG sent to the API (e.g. to inspect dimensions/pixels), add env var `PEEK_SAVE_SCREENSHOT=1` in the Run scheme. Files are written to `~/Desktop/peek-screenshot-<timestamp>.png`.

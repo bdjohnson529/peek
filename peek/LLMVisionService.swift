@@ -93,8 +93,11 @@ enum LLMVisionService {
             throw LLMVisionError.missingAPIKey
         }
 
-        let base64 = try encodeImageAsBase64(image)
+        let (base64, pngData) = try encodeImageAsBase64(image)
         log("image encoded as base64, length: \(base64.count) chars")
+        if saveScreenshotToDisk {
+            writeScreenshotToDisk(pngData: pngData, imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight)
+        }
 
         let body = buildOpenAIRequestBody(imageBase64: base64, userMessage: question, imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight)
         log("sending request to OpenAI (model: gpt-4o, user message length: \(question.count))")
@@ -125,7 +128,13 @@ enum LLMVisionService {
 
     // MARK: - Image encoding
 
-    private static func encodeImageAsBase64(_ image: NSImage) throws -> String {
+    /// If set (e.g. "1"), the exact PNG sent to OpenAI is written to disk for inspection (dimensions, pixels).
+    /// Path: ~/Desktop/peek-screenshot-<timestamp>.png — see console log for full path.
+    private static var saveScreenshotToDisk: Bool {
+        ProcessInfo.processInfo.environment["PEEK_SAVE_SCREENSHOT"] == "1"
+    }
+
+    private static func encodeImageAsBase64(_ image: NSImage) throws -> (base64: String, pngData: Data) {
         log("encoding image to PNG then base64")
         guard let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),
@@ -134,8 +143,22 @@ enum LLMVisionService {
             throw LLMVisionError.imageEncodingFailed
         }
         let base64 = pngData.base64EncodedString()
-        log("PNG size: \(pngData.count) bytes")
-        return base64
+        log("PNG size: \(pngData.count) bytes, dimensions: \(bitmap.pixelsWide)x\(bitmap.pixelsHigh) px")
+        return (base64, pngData)
+    }
+
+    private static func writeScreenshotToDisk(pngData: Data, imagePixelWidth: Int, imagePixelHeight: Int) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd-HH-mm-ss"
+        let name = "peek-screenshot-\(formatter.string(from: Date())).png"
+        let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
+        let url = desktop.appendingPathComponent(name)
+        do {
+            try pngData.write(to: url)
+            log("saved screenshot to disk: \(url.path) (\(imagePixelWidth)x\(imagePixelHeight) px, \(pngData.count) bytes)")
+        } catch {
+            log("failed to save screenshot: \(error)")
+        }
     }
 
     // MARK: - OpenAI request
