@@ -39,8 +39,14 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
     private let highlightManager = HighlightOverlayManager()
 
     static let visionProviderKey = "PeekVisionProvider"
+    static let showScreenshotForDebugKey = "PeekShowScreenshotForDebug"
     /// Selected vision backend; persisted in UserDefaults.
     var selectedVisionProvider: VisionProvider = (UserDefaults.standard.string(forKey: visionProviderKey).flatMap { VisionProvider(rawValue: $0) }) ?? .openAI
+    /// When true, the overlay panel shows the screenshot for debugging. Default false (hidden).
+    var showScreenshotForDebug: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.showScreenshotForDebugKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.showScreenshotForDebugKey) }
+    }
 
     /// Feedback flow state for the overlay UI.
     enum FeedbackState: Sendable {
@@ -326,22 +332,42 @@ struct OverlayPanelView: View {
     var onClose: () -> Void
 
     @State private var questionText = "how do i hide the panel with \"favorites, ben.johnson@nebius.com, inbox, channel partners\""
+    /// Local state so the view re-renders when toggled; synced to UserDefaults for persistence.
+    @State private var showScreenshotForDebug = UserDefaults.standard.bool(forKey: OverlayPanelManager.showScreenshotForDebugKey)
 
     var body: some View {
         VStack(spacing: 12) {
-            Text("Peek Overlay")
-                .font(.headline)
+            HStack {
+                Text("Peek Overlay")
+                    .font(.headline)
+                Spacer(minLength: 8)
+                Toggle(isOn: $showScreenshotForDebug) {
+                    Text("Debug mode")
+                        .foregroundStyle(showScreenshotForDebug ? Color.orange : .primary)
+                        .font(.subheadline)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .onChange(of: showScreenshotForDebug) { _, newValue in
+                    manager.showScreenshotForDebug = newValue
+                }
+            }
+            .padding(8)
+            .background(showScreenshotForDebug ? Color.orange.opacity(0.2) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
 
-            if let screenshot = manager.currentScreenshot {
-                Image(nsImage: screenshot)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-            } else {
-                Text("Screenshot unavailable")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if showScreenshotForDebug {
+                if let screenshot = manager.currentScreenshot {
+                    Image(nsImage: screenshot)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
+                } else {
+                    Text("Screenshot unavailable")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
 
             Group {
@@ -410,12 +436,8 @@ struct OverlayPanelView: View {
                 }
             }
 
-            Divider()
-
-            Button("Close Overlay", action: onClose)
-                .buttonStyle(.bordered)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding()
     }
 
