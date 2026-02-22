@@ -62,7 +62,7 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
 
     /// True when the shortcut was held during the previous flagsChanged event.
     private var shortcutWasHeld = false
-    /// True if we hid the overlay during this hold (so we don’t show again on release).
+    /// True if we hid the overlay during this hold (so we don't show again on release).
     private var didHideDuringHold = false
 
     func startShortcutMonitoring() {
@@ -106,7 +106,7 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
                 self.shortcutWasHeld = true
             }
         } else {
-            // Shortcut released: show overlay only if we didn’t just dismiss it (so user can type).
+            // Shortcut released: show overlay only if we didn't just dismiss it (so user can type).
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 if self.shortcutWasHeld, !self.didHideDuringHold {
