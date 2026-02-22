@@ -321,7 +321,7 @@ struct OverlayPanelView: View {
     var manager: OverlayPanelManager
     var onClose: () -> Void
 
-    @State private var questionText = ""
+    @State private var questionText = "how do i hide the panel with \"favorites, ben.johnson@nebius.com, inbox, channel partners\""
 
     var body: some View {
         VStack(spacing: 12) {
