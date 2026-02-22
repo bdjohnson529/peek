@@ -23,9 +23,14 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
     /// Latest screenshot; persisted when overlay is hidden so it can reappear.
     private var currentScreenshot: NSImage?
 
-    /// Capture context for mapping LLM normalized bbox to screen coordinates. Set when capture succeeds.
+    /// Capture context for mapping LLM bbox to screen coordinates. Set when capture succeeds.
     private(set) var captureContentRect: CGRect?
     private(set) var captureScale: CGFloat = 1
+    /// Display frame in global screen coordinates (NSScreen.frame). Used for bbox mapping and highlight panel placement so we match the window server.
+    private(set) var captureDisplayFrame: CGRect?
+    /// Actual capture image dimensions in pixels (from CGImage). Used so LLM coords and mapping match the exact image we send.
+    private(set) var capturePixelWidth: Int = 0
+    private(set) var capturePixelHeight: Int = 0
 
     /// Last highlight shown; persisted so we can re-show it when overlay reappears.
     private var lastHighlightScreenRect: CGRect?
@@ -119,6 +124,9 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
     /// Captures the display that contains the mouse (or main display) with ScreenCaptureKit, then shows the overlay.
     private func captureAndShow() {
         let targetDisplayID = Self.displayIDForActiveScreen()
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
+        let displayFrame = screen?.frame
 
         Task { [weak self] in
             guard let self else { return }
@@ -144,12 +152,17 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
                         guard let self else { return }
                         self.captureContentRect = rect
                         self.captureScale = CGFloat(scale)
+                        self.captureDisplayFrame = displayFrame
                         if let cgImage {
+                            self.capturePixelWidth = cgImage.width
+                            self.capturePixelHeight = cgImage.height
                             self.currentScreenshot = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
                             self.lastHighlightScreenRect = nil
                             self.lastHighlightDisplayFrame = nil
                         } else {
                             self.currentScreenshot = nil
+                            self.capturePixelWidth = 0
+                            self.capturePixelHeight = 0
                         }
                         self.show()
                     }
@@ -164,6 +177,9 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
     private func showOverlayWithFallback(reason: String) {
         currentScreenshot = nil
         captureContentRect = nil
+        captureDisplayFrame = nil
+        capturePixelWidth = 0
+        capturePixelHeight = 0
         show()
     }
 
@@ -237,13 +253,13 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
             await MainActor.run { feedbackState = .failure(message: "No screenshot. Show the overlay with the shortcut first.") }
             return
         }
-        guard let contentRect = captureContentRect else {
+        guard let displayFrame = captureDisplayFrame,
+              capturePixelWidth > 0, capturePixelHeight > 0 else {
             await MainActor.run { feedbackState = .failure(message: "No capture context. Show the overlay with the shortcut first.") }
             return
         }
-        let scale = captureScale
-        let imagePixelWidth = Int(contentRect.width * scale)
-        let imagePixelHeight = Int(contentRect.height * scale)
+        let imagePixelWidth = capturePixelWidth
+        let imagePixelHeight = capturePixelHeight
         await MainActor.run { feedbackState = .loading }
         do {
             let response = try await LLMVisionService.ask(image: image, question: question, imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight)
@@ -252,11 +268,12 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
                 if let bbox = response.boundingBox {
                     let rect = screenRect(
                         forPixelBbox: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height,
-                        contentRect: contentRect, scale: scale
+                        imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight,
+                        displayFrame: displayFrame
                     )
                     lastHighlightScreenRect = rect
-                    lastHighlightDisplayFrame = contentRect
-                    highlightManager.show(screenRect: rect, displayFrame: contentRect, autoDismissAfterSeconds: 3600)
+                    lastHighlightDisplayFrame = displayFrame
+                    highlightManager.show(screenRect: rect, displayFrame: displayFrame, autoDismissAfterSeconds: 3600)
                 }
             }
         } catch {

@@ -10,17 +10,24 @@ import AppKit
 import CoreGraphics
 
 /// Converts a pixel bounding box from the LLM (in image pixel space) to screen coordinates.
-/// Image is top-left origin; macOS screen Y increases upward. Uses contentRect (points) and scale (points per pixel).
+/// Maps proportionally from (imagePixelWidth x imagePixelHeight) to displayFrame (points).
+/// Image is top-left origin; macOS screen Y increases upward.
 func screenRect(
     forPixelBbox x: Double, y: Double, width: Double, height: Double,
-    contentRect: CGRect, scale: CGFloat
+    imagePixelWidth: Int, imagePixelHeight: Int,
+    displayFrame: CGRect
 ) -> CGRect {
-    let pointX = CGFloat(x) / scale
-    let pointY = CGFloat(y) / scale
-    let pointW = CGFloat(width) / scale
-    let pointH = CGFloat(height) / scale
-    let screenX = contentRect.minX + pointX
-    let screenY = contentRect.maxY - (pointY + pointH)
+    guard imagePixelWidth > 0, imagePixelHeight > 0 else {
+        return .zero
+    }
+    let scaleX = displayFrame.width / CGFloat(imagePixelWidth)
+    let scaleY = displayFrame.height / CGFloat(imagePixelHeight)
+    let pointX = CGFloat(x) * scaleX
+    let pointY = CGFloat(y) * scaleY
+    let pointW = CGFloat(width) * scaleX
+    let pointH = CGFloat(height) * scaleY
+    let screenX = displayFrame.minX + pointX
+    let screenY = displayFrame.maxY - (pointY + pointH)
     return CGRect(x: screenX, y: screenY, width: pointW, height: pointH)
 }
 
