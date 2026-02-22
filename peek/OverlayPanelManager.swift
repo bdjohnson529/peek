@@ -20,12 +20,16 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
     private var panel: NSPanel?
     private var contentView: NSHostingView<OverlayPanelView>?
 
-    /// Latest screenshot captured when shortcut was triggered; cleared on hide.
+    /// Latest screenshot; persisted when overlay is hidden so it can reappear.
     private var currentScreenshot: NSImage?
 
     /// Capture context for mapping LLM normalized bbox to screen coordinates. Set when capture succeeds.
     private(set) var captureContentRect: CGRect?
     private(set) var captureScale: CGFloat = 1
+
+    /// Last highlight shown; persisted so we can re-show it when overlay reappears.
+    private var lastHighlightScreenRect: CGRect?
+    private var lastHighlightDisplayFrame: CGRect?
 
     private let highlightManager = HighlightOverlayManager()
 
@@ -91,7 +95,11 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 if self.shortcutWasHeld, !self.didHideDuringHold {
-                    self.captureAndShow()
+                    if self.currentScreenshot != nil {
+                        self.showExisting()
+                    } else {
+                        self.captureAndShow()
+                    }
                 }
                 self.shortcutWasHeld = false
                 self.didHideDuringHold = false
@@ -157,6 +165,14 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
         show()
     }
 
+    /// Shows the overlay using persisted state (screenshot, answer, highlight) without re-capturing.
+    private func showExisting() {
+        show()
+        if let rect = lastHighlightScreenRect, let frame = lastHighlightDisplayFrame {
+            highlightManager.show(screenRect: rect, displayFrame: frame, autoDismissAfterSeconds: 3600)
+        }
+    }
+
     func show() {
         if panel != nil { return }
 
@@ -200,9 +216,7 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
         panel?.orderOut(nil)
         panel = nil
         contentView = nil
-        currentScreenshot = nil
-        captureContentRect = nil
-        feedbackState = .idle
+        // Keep currentScreenshot, captureContentRect, feedbackState, lastHighlight* so they persist and reappear on next show.
     }
 
     /// Run the feedback flow: call LLM with current screenshot and question; show highlight if bbox returned.
@@ -223,6 +237,8 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
                         forNormalizedBbox: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height,
                         contentRect: contentRect
                     )
+                    lastHighlightScreenRect = rect
+                    lastHighlightDisplayFrame = contentRect
                     highlightManager.show(screenRect: rect, displayFrame: contentRect, autoDismissAfterSeconds: 10)
                 }
             }
