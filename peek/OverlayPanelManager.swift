@@ -38,6 +38,10 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
 
     private let highlightManager = HighlightOverlayManager()
 
+    static let visionProviderKey = "PeekVisionProvider"
+    /// Selected vision backend; persisted in UserDefaults.
+    var selectedVisionProvider: VisionProvider = (UserDefaults.standard.string(forKey: visionProviderKey).flatMap { VisionProvider(rawValue: $0) }) ?? .openAI
+
     /// Feedback flow state for the overlay UI.
     enum FeedbackState: Sendable {
         case idle
@@ -262,7 +266,7 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
         let imagePixelHeight = capturePixelHeight
         await MainActor.run { feedbackState = .loading }
         do {
-            let response = try await LLMVisionService.ask(image: image, question: question, imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight)
+            let response = try await LLMVisionService.ask(provider: selectedVisionProvider, image: image, question: question, imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight)
             await MainActor.run {
                 feedbackState = .success(answer: response.answer)
                 if let bbox = response.boundingBox {
@@ -341,6 +345,20 @@ struct OverlayPanelView: View {
             }
 
             Group {
+                Picker("Provider", selection: Binding(
+                    get: { manager.selectedVisionProvider },
+                    set: { new in
+                        manager.selectedVisionProvider = new
+                        UserDefaults.standard.set(new.rawValue, forKey: OverlayPanelManager.visionProviderKey)
+                    }
+                )) {
+                    ForEach(VisionProvider.allCases, id: \.self) { p in
+                        Text(p.rawValue == "openAI" ? "OpenAI" : "Vertex").tag(p)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(loading)
+
                 TextField("Ask about this screen...", text: $questionText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(2 ... 4)

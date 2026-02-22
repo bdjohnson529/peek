@@ -1,27 +1,19 @@
 //
-//  LLMVisionService.swift
+//  OpenAIVisionClient.swift
 //  peek
 //
-//  Calls a vision LLM (OpenAI GPT-4o) with a screenshot and user question;
-//  returns a text answer and optional pixel bounding box for on-screen highlight.
+//  OpenAI GPT-4o vision API: screenshot + question → answer and optional pixel bounding box.
 //
 
-import AppKit
 import Foundation
 
-// MARK: - API key storage (Run scheme env or Info.plist)
-
-enum LLMVisionService {
+enum OpenAIVisionClient {
     private static let infoPlistKey = "OpenAIAPIKey"
 
-    /// API key is read from OPENAI_API_KEY environment variable (set in Run scheme: Edit Scheme → Run → Arguments → Environment Variables)
-    /// or from Info.plist key OpenAIAPIKey if present.
+    /// API key from OPENAI_API_KEY env or Info.plist key OpenAIAPIKey.
     static var apiKey: String? {
-        // Debug: trace where the key comes from and if it looks valid
         let fromPlist = Bundle.main.object(forInfoDictionaryKey: infoPlistKey) as? String
         let fromEnv = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
-        debugLogAPIKey(fromPlist: fromPlist, fromEnv: fromEnv)
-
         if let key = fromPlist, !key.isEmpty {
             return key.trimmingCharacters(in: .whitespacesAndNewlines)
         }
@@ -31,17 +23,15 @@ enum LLMVisionService {
         return nil
     }
 
-    /// Call from app launch or when debugging API key injection (Info.plist vs xcconfig).
+    /// Call from app launch or when debugging API key injection.
     static func debugLogAPIKey(fromPlist: String? = nil, fromEnv: String? = nil) {
         let plist = fromPlist ?? (Bundle.main.object(forInfoDictionaryKey: infoPlistKey) as? String)
         let env = fromEnv ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
         print("[OpenAI API key debug]")
         print("  Info.plist key '\(infoPlistKey)': \(describeKey(plist))")
         print("  ENV OPENAI_API_KEY: \(describeKey(env))")
-        if let raw = plist {
-            if raw != raw.trimmingCharacters(in: .whitespacesAndNewlines) {
-                print("  ⚠️ Info.plist value has leading/trailing whitespace")
-            }
+        if let raw = plist, raw != raw.trimmingCharacters(in: .whitespacesAndNewlines) {
+            print("  ⚠️ Info.plist value has leading/trailing whitespace")
         }
         if let raw = env, raw != raw.trimmingCharacters(in: .whitespacesAndNewlines) {
             print("  ⚠️ ENV value has leading/trailing whitespace")
@@ -57,10 +47,8 @@ enum LLMVisionService {
         return "length=\(v.count)\(hasSpace ? ", has leading/trailing space" : ""), preview=\"\(preview)\""
     }
 
-    /// Response from the vision LLM: answer text and optional bounding box in image pixel coordinates.
-    struct VisionResponse: Sendable {
-        var answer: String
-        var boundingBox: (x: Double, y: Double, width: Double, height: Double)?
+    private static func log(_ message: String) {
+        print("[OpenAIVision] \(message)")
     }
 
     private static func systemPrompt(imagePixelWidth: Int, imagePixelHeight: Int) -> String {
@@ -80,26 +68,14 @@ enum LLMVisionService {
         """
     }
 
-    private static func log(_ message: String) {
-        print("[LLMVision] \(message)")
-    }
-
-    /// Sends the image and question to the vision API; returns answer and optional bbox in pixel coordinates.
-    static func ask(image: NSImage, question: String, imagePixelWidth: Int, imagePixelHeight: Int) async throws -> VisionResponse {
-        log("ask() called — question: \"\(question)\", image: \(imagePixelWidth)x\(imagePixelHeight) px")
-
+    /// Calls OpenAI vision API; returns answer and optional bbox in image pixel coordinates.
+    static func ask(imageBase64: String, question: String, imagePixelWidth: Int, imagePixelHeight: Int) async throws -> VisionResponse {
         guard let key = apiKey, !key.isEmpty else {
             log("error: missing API key")
             throw LLMVisionError.missingAPIKey
         }
 
-        let (base64, pngData) = try encodeImageAsBase64(image)
-        log("image encoded as base64, length: \(base64.count) chars")
-        if saveScreenshotToDisk {
-            writeScreenshotToDisk(pngData: pngData, imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight)
-        }
-
-        let body = buildOpenAIRequestBody(imageBase64: base64, userMessage: question, imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight)
+        let body = buildRequestBody(imageBase64: imageBase64, userMessage: question, imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight)
         log("sending request to OpenAI (model: gpt-4o, user message length: \(question.count))")
 
         let (data, response) = try await performRequest(body: body, apiKey: key)
@@ -116,54 +92,10 @@ enum LLMVisionService {
             throw LLMVisionError.apiError(statusCode: http.statusCode, body: message)
         }
 
-        let result = try parseOpenAIResponse(data: data, imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight)
-        log("result — answer: \"\(result.answer)\"")
-        if let bbox = result.boundingBox {
-            log("result — boundingBox: x=\(bbox.x), y=\(bbox.y), width=\(bbox.width), height=\(bbox.height)")
-        } else {
-            log("result — boundingBox: nil")
-        }
-        return result
+        return try parseResponse(data: data, imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight)
     }
 
-    // MARK: - Image encoding
-
-    /// If set (e.g. "1"), the exact PNG sent to OpenAI is written to disk for inspection (dimensions, pixels).
-    /// Path: ~/Desktop/peek-screenshot-<timestamp>.png — see console log for full path.
-    private static var saveScreenshotToDisk: Bool {
-        ProcessInfo.processInfo.environment["PEEK_SAVE_SCREENSHOT"] == "1"
-    }
-
-    private static func encodeImageAsBase64(_ image: NSImage) throws -> (base64: String, pngData: Data) {
-        log("encoding image to PNG then base64")
-        guard let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let pngData = bitmap.representation(using: .png, properties: [:]) else {
-            log("error: image encoding failed (TIFF/bitmap/PNG)")
-            throw LLMVisionError.imageEncodingFailed
-        }
-        let base64 = pngData.base64EncodedString()
-        log("PNG size: \(pngData.count) bytes, dimensions: \(bitmap.pixelsWide)x\(bitmap.pixelsHigh) px")
-        return (base64, pngData)
-    }
-
-    private static func writeScreenshotToDisk(pngData: Data, imagePixelWidth: Int, imagePixelHeight: Int) {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd-HH-mm-ss"
-        let name = "peek-screenshot-\(formatter.string(from: Date())).png"
-        let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
-        let url = desktop.appendingPathComponent(name)
-        do {
-            try pngData.write(to: url)
-            log("saved screenshot to disk: \(url.path) (\(imagePixelWidth)x\(imagePixelHeight) px, \(pngData.count) bytes)")
-        } catch {
-            log("failed to save screenshot: \(error)")
-        }
-    }
-
-    // MARK: - OpenAI request
-
-    private static func buildOpenAIRequestBody(imageBase64: String, userMessage: String, imagePixelWidth: Int, imagePixelHeight: Int) -> [String: Any] {
+    private static func buildRequestBody(imageBase64: String, userMessage: String, imagePixelWidth: Int, imagePixelHeight: Int) -> [String: Any] {
         let prompt = systemPrompt(imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight)
         return [
             "model": "gpt-4o",
@@ -197,8 +129,6 @@ enum LLMVisionService {
         return (data, response)
     }
 
-    // MARK: - Response parsing
-
     private struct OpenAIChoice: Decodable {
         let message: OpenAIMessage
     }
@@ -211,7 +141,7 @@ enum LLMVisionService {
         let choices: [OpenAIChoice]?
     }
 
-    private static func parseOpenAIResponse(data: Data, imagePixelWidth: Int, imagePixelHeight: Int) throws -> VisionResponse {
+    private static func parseResponse(data: Data, imagePixelWidth: Int, imagePixelHeight: Int) throws -> VisionResponse {
         log("parsing OpenAI response")
         let decoded = try JSONDecoder().decode(OpenAIResponse.self, from: data)
         guard let content = decoded.choices?.first?.message.content, !content.isEmpty else {
@@ -220,7 +150,6 @@ enum LLMVisionService {
         }
         log("raw LLM content (\(content.count) chars): \(content)")
         let jsonString = extractJSON(from: content)
-        log("extracted JSON length: \(jsonString.count)")
         let jsonData = Data(jsonString.utf8)
 
         struct RawBoundingBox: Decodable {
@@ -233,7 +162,7 @@ enum LLMVisionService {
 
         let raw = try JSONDecoder().decode(RawResponse.self, from: jsonData)
         let answer = raw.answer ?? ""
-        var bbox: (x: Double, y: Double, width: Double, height: Double)? = nil
+        var bbox: (x: Double, y: Double, width: Double, height: Double)?
         if let box = raw.boundingBox,
            let x = box.x, let y = box.y, let w = box.width, let h = box.height,
            x >= 0, y >= 0, w > 0, h > 0 {
@@ -245,11 +174,10 @@ enum LLMVisionService {
             let clampedH = min(h, maxY - clampedY)
             bbox = (clampedX, clampedY, clampedW, clampedH)
         }
-        log("parsed — answer: \"\(answer)\", boundingBox: \(bbox)")
+        log("parsed — answer: \"\(answer)\", boundingBox: \(String(describing: bbox))")
         return VisionResponse(answer: answer, boundingBox: bbox)
     }
 
-    /// Strip optional markdown code fence so we can parse JSON.
     private static func extractJSON(from content: String) -> String {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("```") {
@@ -259,28 +187,5 @@ enum LLMVisionService {
             return String(afterLang[..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return trimmed
-    }
-}
-
-enum LLMVisionError: Error, LocalizedError {
-    case missingAPIKey
-    case imageEncodingFailed
-    case invalidResponse
-    case apiError(statusCode: Int, body: String)
-    case emptyContent
-
-    var errorDescription: String? {
-        switch self {
-        case .missingAPIKey:
-            return "OpenAI API key is not set. Set OPENAI_API_KEY in the Run scheme: Product → Scheme → Edit Scheme → Run → Arguments → Environment Variables."
-        case .imageEncodingFailed:
-            return "Could not encode the screenshot."
-        case .invalidResponse:
-            return "Invalid response from the API."
-        case .apiError(let code, let body):
-            return "API error (\(code)): \(body)"
-        case .emptyContent:
-            return "The model returned no content."
-        }
     }
 }

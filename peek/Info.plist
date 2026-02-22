@@ -4,5 +4,7 @@
 <dict>
 	<key>OpenAIAPIKey</key>
 	<string>$(OPENAI_API_KEY)</string>
+	<key>GOOGLE_CLOUD_PROJECT</key>
+	<string>$(GOOGLE_CLOUD_PROJECT)</string>
 </dict>
 </plist>

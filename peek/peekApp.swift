@@ -14,7 +14,7 @@ struct peekApp: App {
 
     init() {
         #if DEBUG
-        LLMVisionService.debugLogAPIKey()
+        OpenAIVisionClient.debugLogAPIKey()
         #endif
     }
 
