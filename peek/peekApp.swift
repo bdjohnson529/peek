@@ -32,7 +32,7 @@ struct peekApp: App {
         .windowResizability(.contentSize)
 
         Settings {
-            SettingsView()
+            SetupView(permissions: permissions, bringWindowToFront: false)
         }
     }
 }
