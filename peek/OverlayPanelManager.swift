@@ -20,8 +20,8 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
     private var panel: NSPanel?
     private var contentView: NSHostingView<OverlayPanelView>?
 
-    /// Latest screenshot; persisted when overlay is hidden so it can reappear.
-    private var currentScreenshot: NSImage?
+    /// Latest screenshot; persisted when overlay is hidden so it can reappear. Cleared by reset().
+    private(set) var currentScreenshot: NSImage?
 
     /// Capture context for mapping LLM bbox to screen coordinates. Set when capture succeeds.
     private(set) var captureContentRect: CGRect?
@@ -206,7 +206,7 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.delegate = self
 
-        let content = OverlayPanelView(manager: self, screenshot: currentScreenshot, onClose: { [weak self] in self?.hide() })
+        let content = OverlayPanelView(manager: self, onClose: { [weak self] in self?.hide() })
         let hosting = NSHostingView(rootView: content)
         hosting.frame = panel.contentRect(forFrameRect: panel.frame)
         panel.contentView = hosting
@@ -287,6 +287,20 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
         highlightManager.hide()
     }
 
+    /// Clears screenshot, highlight, capture context, and feedback state so the next shortcut press does a fresh capture.
+    func reset() {
+        highlightManager.hide()
+        currentScreenshot = nil
+        captureContentRect = nil
+        captureScale = 1
+        captureDisplayFrame = nil
+        capturePixelWidth = 0
+        capturePixelHeight = 0
+        lastHighlightScreenRect = nil
+        lastHighlightDisplayFrame = nil
+        feedbackState = .idle
+    }
+
     var isHighlightVisible: Bool {
         highlightManager.isVisible
     }
@@ -305,7 +319,6 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
 /// SwiftUI content for the overlay panel: screenshot, feedback text field, Ask, and result.
 struct OverlayPanelView: View {
     var manager: OverlayPanelManager
-    var screenshot: NSImage?
     var onClose: () -> Void
 
     @State private var questionText = ""
@@ -315,7 +328,7 @@ struct OverlayPanelView: View {
             Text("Peek Overlay")
                 .font(.headline)
 
-            if let screenshot {
+            if let screenshot = manager.currentScreenshot {
                 Image(nsImage: screenshot)
                     .resizable()
                     .scaledToFit()
@@ -346,6 +359,12 @@ struct OverlayPanelView: View {
                         }
                         .buttonStyle(.bordered)
                     }
+
+                    Button("Reset") {
+                        manager.reset()
+                        questionText = ""
+                    }
+                    .buttonStyle(.bordered)
                 }
 
                 if loading {
