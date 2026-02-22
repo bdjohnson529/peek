@@ -9,17 +9,19 @@
 import AppKit
 import CoreGraphics
 
-/// Converts a normalized (0–1) bounding box from the LLM to screen coordinates.
-/// Image is top-left origin; macOS screen Y increases upward.
+/// Converts a pixel bounding box from the LLM (in image pixel space) to screen coordinates.
+/// Image is top-left origin; macOS screen Y increases upward. Uses contentRect (points) and scale (points per pixel).
 func screenRect(
-    forNormalizedBbox x: Double, y: Double, width: Double, height: Double,
-    contentRect: CGRect
+    forPixelBbox x: Double, y: Double, width: Double, height: Double,
+    contentRect: CGRect, scale: CGFloat
 ) -> CGRect {
-    let screenX = contentRect.minX + CGFloat(x) * contentRect.width
-    let screenY = contentRect.maxY - CGFloat(y + height) * contentRect.height
-    let screenW = CGFloat(width) * contentRect.width
-    let screenH = CGFloat(height) * contentRect.height
-    return CGRect(x: screenX, y: screenY, width: screenW, height: screenH)
+    let pointX = CGFloat(x) / scale
+    let pointY = CGFloat(y) / scale
+    let pointW = CGFloat(width) / scale
+    let pointH = CGFloat(height) / scale
+    let screenX = contentRect.minX + pointX
+    let screenY = contentRect.maxY - (pointY + pointH)
+    return CGRect(x: screenX, y: screenY, width: pointW, height: pointH)
 }
 
 /// Manages a single full-screen transparent window that draws one rectangle (bounding box).

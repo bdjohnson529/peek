@@ -3,7 +3,7 @@
 //  peek
 //
 //  Calls a vision LLM (OpenAI GPT-4o) with a screenshot and user question;
-//  returns a text answer and optional normalized bounding box for on-screen highlight.
+//  returns a text answer and optional pixel bounding box for on-screen highlight.
 //
 
 import AppKit
@@ -57,33 +57,36 @@ enum LLMVisionService {
         return "length=\(v.count)\(hasSpace ? ", has leading/trailing space" : ""), preview=\"\(preview)\""
     }
 
-    /// Response from the vision LLM: answer text and optional normalized (0–1) bounding box.
+    /// Response from the vision LLM: answer text and optional bounding box in image pixel coordinates.
     struct VisionResponse: Sendable {
         var answer: String
         var boundingBox: (x: Double, y: Double, width: Double, height: Double)?
     }
 
-    private static let systemPrompt = """
-    The user is asking about a screenshot of their screen (e.g. "Where do I click?", "How do I do this?", "Which button?", "How do I click on this part?"). Your job is to answer in text AND to return a bounding box so the app can highlight the relevant area on screen.
+    private static func systemPrompt(imagePixelWidth: Int, imagePixelHeight: Int) -> String {
+        """
+        The user is asking about a screenshot of their screen (e.g. "Where do I click?", "How do I do this?", "Which button?", "How do I click on this part?"). Your job is to answer in text AND to return a bounding box so the app can highlight the relevant area on screen.
 
-    Reply with JSON only, no other text. Use this exact format:
-    {"answer": "short explanation of where to click or what to do", "boundingBox": {"x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0}}
+        The image dimensions are \(imagePixelWidth) x \(imagePixelHeight) pixels. Use these exact dimensions for the bounding box.
 
-    Rules:
-    - answer: Brief, helpful text (e.g. "Click the Settings gear in the top-right" or "Use the Search field at the top").
-    - boundingBox: REQUIRED whenever the user is asking where to click, which element to use, or how to do something that involves a specific visible UI element. Give the region the user should interact with (button, menu item, icon, field, etc.). Use top-left (x, y) and size (width, height), all normalized 0.0–1.0 relative to the image (0,0 = top-left of image, 1,1 = bottom-right). Only omit boundingBox or set it to null if the question has no single target (e.g. general explanation with no specific element).
+        Reply with JSON only, no other text. Use this exact format:
+        {"answer": "short explanation of where to click or what to do", "boundingBox": {"x": 0, "y": 0, "width": 0, "height": 0}}
 
-    When in doubt, include a bounding box for the most relevant element so we can show a highlight on screen.
-    """
+        Rules:
+        - answer: Brief, helpful text (e.g. "Click the Settings gear in the top-right" or "Use the Search field at the top").
+        - boundingBox: REQUIRED whenever the user is asking where to click, which element to use, or how to do something that involves a specific visible UI element. Give the region the user should interact with (button, menu item, icon, field, etc.). Use top-left (x, y) and size (width, height) in PIXEL coordinates: x and width in range [0, \(imagePixelWidth)], y and height in range [0, \(imagePixelHeight)]. Origin (0,0) is the top-left of the image. Only omit boundingBox or set it to null if the question has no single target (e.g. general explanation with no specific element).
+
+        When in doubt, include a bounding box for the most relevant element so we can show a highlight on screen.
+        """
+    }
 
     private static func log(_ message: String) {
         print("[LLMVision] \(message)")
     }
 
-    /// Sends the image and question to the vision API; returns answer and optional normalized bbox.
-    static func ask(image: NSImage, question: String) async throws -> VisionResponse {
-        log("ask() called — question: \"\(question)\"")
-        log("input image size: \(image.size.width)x\(image.size.height) points")
+    /// Sends the image and question to the vision API; returns answer and optional bbox in pixel coordinates.
+    static func ask(image: NSImage, question: String, imagePixelWidth: Int, imagePixelHeight: Int) async throws -> VisionResponse {
+        log("ask() called — question: \"\(question)\", image: \(imagePixelWidth)x\(imagePixelHeight) px")
 
         guard let key = apiKey, !key.isEmpty else {
             log("error: missing API key")
@@ -93,7 +96,7 @@ enum LLMVisionService {
         let base64 = try encodeImageAsBase64(image)
         log("image encoded as base64, length: \(base64.count) chars")
 
-        let body = buildOpenAIRequestBody(imageBase64: base64, userMessage: question)
+        let body = buildOpenAIRequestBody(imageBase64: base64, userMessage: question, imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight)
         log("sending request to OpenAI (model: gpt-4o, user message length: \(question.count))")
 
         let (data, response) = try await performRequest(body: body, apiKey: key)
@@ -110,7 +113,7 @@ enum LLMVisionService {
             throw LLMVisionError.apiError(statusCode: http.statusCode, body: message)
         }
 
-        let result = try parseOpenAIResponse(data: data)
+        let result = try parseOpenAIResponse(data: data, imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight)
         log("result — answer: \"\(result.answer)\"")
         if let bbox = result.boundingBox {
             log("result — boundingBox: x=\(bbox.x), y=\(bbox.y), width=\(bbox.width), height=\(bbox.height)")
@@ -137,11 +140,12 @@ enum LLMVisionService {
 
     // MARK: - OpenAI request
 
-    private static func buildOpenAIRequestBody(imageBase64: String, userMessage: String) -> [String: Any] {
-        [
+    private static func buildOpenAIRequestBody(imageBase64: String, userMessage: String, imagePixelWidth: Int, imagePixelHeight: Int) -> [String: Any] {
+        let prompt = systemPrompt(imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight)
+        return [
             "model": "gpt-4o",
             "messages": [
-                ["role": "system", "content": systemPrompt],
+                ["role": "system", "content": prompt],
                 [
                     "role": "user",
                     "content": [
@@ -184,7 +188,7 @@ enum LLMVisionService {
         let choices: [OpenAIChoice]?
     }
 
-    private static func parseOpenAIResponse(data: Data) throws -> VisionResponse {
+    private static func parseOpenAIResponse(data: Data, imagePixelWidth: Int, imagePixelHeight: Int) throws -> VisionResponse {
         log("parsing OpenAI response")
         let decoded = try JSONDecoder().decode(OpenAIResponse.self, from: data)
         guard let content = decoded.choices?.first?.message.content, !content.isEmpty else {
@@ -209,8 +213,14 @@ enum LLMVisionService {
         var bbox: (x: Double, y: Double, width: Double, height: Double)? = nil
         if let box = raw.boundingBox,
            let x = box.x, let y = box.y, let w = box.width, let h = box.height,
-           (0...1).contains(x), (0...1).contains(y), (0...1).contains(w), (0...1).contains(h) {
-            bbox = (x, y, w, h)
+           x >= 0, y >= 0, w > 0, h > 0 {
+            let maxX = Double(imagePixelWidth)
+            let maxY = Double(imagePixelHeight)
+            let clampedX = min(max(0, x), maxX - 1)
+            let clampedY = min(max(0, y), maxY - 1)
+            let clampedW = min(w, maxX - clampedX)
+            let clampedH = min(h, maxY - clampedY)
+            bbox = (clampedX, clampedY, clampedW, clampedH)
         }
         log("parsed — answer: \"\(answer)\", boundingBox: \(bbox)")
         return VisionResponse(answer: answer, boundingBox: bbox)

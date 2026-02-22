@@ -237,16 +237,22 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
             await MainActor.run { feedbackState = .failure(message: "No screenshot. Show the overlay with the shortcut first.") }
             return
         }
+        guard let contentRect = captureContentRect else {
+            await MainActor.run { feedbackState = .failure(message: "No capture context. Show the overlay with the shortcut first.") }
+            return
+        }
+        let scale = captureScale
+        let imagePixelWidth = Int(contentRect.width * scale)
+        let imagePixelHeight = Int(contentRect.height * scale)
         await MainActor.run { feedbackState = .loading }
         do {
-            let response = try await LLMVisionService.ask(image: image, question: question)
+            let response = try await LLMVisionService.ask(image: image, question: question, imagePixelWidth: imagePixelWidth, imagePixelHeight: imagePixelHeight)
             await MainActor.run {
                 feedbackState = .success(answer: response.answer)
-                if let bbox = response.boundingBox,
-                   let contentRect = captureContentRect {
+                if let bbox = response.boundingBox {
                     let rect = screenRect(
-                        forNormalizedBbox: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height,
-                        contentRect: contentRect
+                        forPixelBbox: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height,
+                        contentRect: contentRect, scale: scale
                     )
                     lastHighlightScreenRect = rect
                     lastHighlightDisplayFrame = contentRect
