@@ -74,7 +74,7 @@ enum LLMVisionService {
 
         Rules:
         - answer: Brief, helpful text (e.g. "Click the Settings gear in the top-right" or "Use the Search field at the top").
-        - boundingBox: REQUIRED whenever the user is asking where to click, which element to use, or how to do something that involves a specific visible UI element. Give the region the user should interact with (button, menu item, icon, field, etc.). Use top-left (x, y) and size (width, height) in PIXEL coordinates: x and width in range [0, \(imagePixelWidth)], y and height in range [0, \(imagePixelHeight)]. Origin (0,0) is the top-left of the image. Only omit boundingBox or set it to null if the question has no single target (e.g. general explanation with no specific element).
+        - boundingBox: REQUIRED whenever the user is asking where to click, which element to use, or how to do something that involves a specific visible UI element. Return the smallest axis-aligned rectangle that tightly encloses the entire target UI element (button, icon, menu item, or field), with no extra padding. Use top-left (x, y) and size (width, height) in PIXEL coordinates: x and width in range [0, \(imagePixelWidth)], y and height in range [0, \(imagePixelHeight)]. Origin (0,0) is the top-left of the image. Only omit boundingBox or set it to null if the question has no single target (e.g. general explanation with no specific element).
 
         When in doubt, include a bounding box for the most relevant element so we can show a highlight on screen.
         """
