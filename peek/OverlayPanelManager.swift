@@ -146,6 +146,8 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
                         self.captureScale = CGFloat(scale)
                         if let cgImage {
                             self.currentScreenshot = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+                            self.lastHighlightScreenRect = nil
+                            self.lastHighlightDisplayFrame = nil
                         } else {
                             self.currentScreenshot = nil
                         }
@@ -168,9 +170,6 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
     /// Shows the overlay using persisted state (screenshot, answer, highlight) without re-capturing.
     private func showExisting() {
         show()
-        if let rect = lastHighlightScreenRect, let frame = lastHighlightDisplayFrame {
-            highlightManager.show(screenRect: rect, displayFrame: frame, autoDismissAfterSeconds: 3600)
-        }
     }
 
     func show() {
@@ -209,6 +208,11 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
 
         self.panel = panel
         self.contentView = hosting
+
+        // Restore persisted highlight so it reappears whether we were shown via shortcut or menu.
+        if let rect = lastHighlightScreenRect, let frame = lastHighlightDisplayFrame {
+            highlightManager.show(screenRect: rect, displayFrame: frame, autoDismissAfterSeconds: 3600)
+        }
     }
 
     func hide() {
@@ -239,7 +243,7 @@ final class OverlayPanelManager: NSObject, NSWindowDelegate {
                     )
                     lastHighlightScreenRect = rect
                     lastHighlightDisplayFrame = contentRect
-                    highlightManager.show(screenRect: rect, displayFrame: contentRect, autoDismissAfterSeconds: 10)
+                    highlightManager.show(screenRect: rect, displayFrame: contentRect, autoDismissAfterSeconds: 3600)
                 }
             }
         } catch {

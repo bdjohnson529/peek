@@ -46,7 +46,7 @@ final class HighlightOverlayManager {
         panel.hasShadow = false
         panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.maximumWindow)) + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.ignoresMouseEvents = true
+        panel.ignoresMouseEvents = false
 
         // Convert screen rect to window (content) coordinates.
         let rectInWindow = CGRect(
